@@ -385,7 +385,7 @@ const YRCOLORS = ["#16a34a","#dc2626","#2563eb","#d97706","#7c3aed"];
 // ─── Data Table ──────────────────────────────────────────────────────────────
 const PAGE_SIZE = 100;
 
-function DataTable({ rows, columns }) {
+function DataTable({ rows, columns, totals }) {
   const [page, setPage] = useState(0);
   const [sortCol, setSortCol] = useState(null);
   const [sortDir, setSortDir] = useState("asc"); // "asc" | "desc"
@@ -490,6 +490,22 @@ function DataTable({ rows, columns }) {
             </tr>
           </thead>
           <tbody>
+            {/* Totals row */}
+            {totals && (
+              <tr style={{ borderBottom:"2px solid #bfdbfe", background:"#dbeafe", fontWeight:700, position:"sticky", top:37, zIndex:1 }}>
+                <td style={{ padding:"8px 12px", color:"#1d4ed8", fontFamily:"monospace", fontSize:11, fontWeight:800 }}>Σ</td>
+                {columns.map(col => {
+                  const val = totals[col];
+                  const isNum = col === "sale" || col === "uns";
+                  if (val == null) return <td key={col} style={{ padding:"8px 12px", color:"#93c5fd", fontSize:11 }}>—</td>;
+                  return (
+                    <td key={col} style={{ padding:"8px 12px", color:"#1d4ed8", fontFamily: isNum?"monospace":"inherit", fontSize:12, fontWeight:800 }}>
+                      {isNum ? Number(val).toLocaleString() : val}
+                    </td>
+                  );
+                })}
+              </tr>
+            )}
             {pageRows.map((row, i) => {
               const globalIdx = safePage * PAGE_SIZE + i;
               return (
@@ -544,7 +560,7 @@ function DataTable({ rows, columns }) {
 
 // ─── Dashboard ───────────────────────────────────────────────────────────────
 function Dashboard({ data, mapping, filename, onReset }) {
-  const [activeTab, setActiveTab] = useState("overview");
+  const [activeTab, setActiveTab] = useState("data");
   const [filters, setFilters] = useState({});
   // Lazy-load state for Data tab: false = not yet revealed, true = shown
   // Once shown, stays shown and auto-updates with filter changes
@@ -640,12 +656,12 @@ function Dashboard({ data, mapping, filename, onReset }) {
   }, [data]);
  
   const TABS = [
+    { id:"data", label:"📋 Data" },
     { id:"overview", label:"Overview" },
     hasPubl && { id:"publication", label:"By "+(mapping.publ||"Product") },
     hasSorg && { id:"geo", label:"By "+(mapping.sorg||"Org") },
     hasLoc && { id:"location", label:"By "+(mapping.location||"Location") },
     hasTime && { id:"trends", label:"Trends" },
-    { id:"data", label:"📋 Data" },
   ].filter(Boolean);
  
   // ── Chart data ─────────────────────────────────────────────────────────────
@@ -984,7 +1000,12 @@ function Dashboard({ data, mapping, filename, onReset }) {
               </div>
             ) : (
               <div style={{ background:"#fff", borderRadius:12, padding:"18px 20px", border:"1px solid #e2e8f0", boxShadow:"0 1px 3px rgba(0,0,0,0.05)" }}>
-                <DataTable rows={filtered} columns={tableColumns} />
+                <DataTable rows={filtered} columns={tableColumns} totals={tableColumns.reduce((acc, col) => {
+                    if (col === "sale") acc[col] = totSale;
+                    else if (col === "uns") acc[col] = totUns;
+                    else acc[col] = null;
+                    return acc;
+                  }, {})} />
               </div>
             )}
           </div>
