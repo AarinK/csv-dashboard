@@ -385,7 +385,7 @@ const YRCOLORS = ["#16a34a","#dc2626","#2563eb","#d97706","#7c3aed"];
 // ─── Data Table ──────────────────────────────────────────────────────────────
 const PAGE_SIZE = 100;
 
-function DataTable({ rows, columns, totals }) {
+function DataTable({ rows, columns, totals, aggPct }) {
   const [page, setPage] = useState(0);
   const [sortCol, setSortCol] = useState(null);
   const [sortDir, setSortDir] = useState("asc"); // "asc" | "desc"
@@ -501,6 +501,11 @@ function DataTable({ rows, columns, totals }) {
                   return (
                     <td key={col} style={{ padding:"8px 12px", color:"#1d4ed8", fontFamily: isNum?"monospace":"inherit", fontSize:12, fontWeight:800 }}>
                       {isNum ? Number(val).toLocaleString() : val}
+                      {col === "uns" && aggPct != null && (
+                        <span style={{ marginLeft:8, background:"#fef3c7", color:"#b45309", border:"1px solid #fcd34d", borderRadius:20, padding:"1px 8px", fontFamily:"monospace", fontSize:11, fontWeight:700 }}>
+                          {aggPct.toFixed(2)}%
+                        </span>
+                      )}
                     </td>
                   );
                 })}
@@ -605,9 +610,11 @@ function Dashboard({ data, mapping, filename, onReset }) {
   // Aggregations
   const totSale = useMemo(() => filtered.reduce((s,r) => s+r.sale, 0), [filtered]);
   const totUns  = useMemo(() => filtered.reduce((s,r) => s+r.uns, 0), [filtered]);
-  const pct = totSale > 0 ? totUns/totSale*100 : 0;
+  const totSold = useMemo(() => totSale - totUns, [totSale, totUns]);
+  const pct = useMemo(() => totSale > 0 ? totUns/totSale*100 : 0, [totSale, totUns]);
+  const soldPct = useMemo(() => totSale > 0 ? totSold/totSale*100 : 0, [totSale, totSold]);
   const nMonths = useMemo(() => new Set(filtered.map(r=>r[mapping.month]).filter(Boolean)).size || 1, [filtered, mapping.month]);
-  const daily = Math.round(totUns / (nMonths * 30));
+  const daily = useMemo(() => Math.round(totUns / (nMonths * 30)), [totUns, nMonths]);
  
   const byPubl    = useMemo(() => agg(filtered, mapping.publ).sort((a,b)=>b.uns-a.uns), [filtered, mapping.publ]);
   const bySorgAll = useMemo(() => agg(filtered, mapping.sorg), [filtered, mapping.sorg]);
@@ -769,7 +776,7 @@ function Dashboard({ data, mapping, filename, onReset }) {
           <p style={{ color:"#475569", fontSize:11, margin:"2px 0 0" }}>{filename} · {data.length.toLocaleString()} rows</p>
         </div>
         <div style={{ display:"flex", gap:10, alignItems:"center" }}>
-          {[{ v:fmtNum(totUns), l:"Total UNS", c:"#f87171" },{ v:pct.toFixed(2)+"%", l:"UNS %", c:"#fbbf24" },{ v:"~"+fmtNum(daily), l:"Per Day", c:"#a78bfa" },{ v:fmtNum(totSale), l:"Total Sale", c:"#4ade80" }].map(k=>(
+          {[{ v:fmtNum(totSold), l:"Sold", c:"#4ade80" },{ v:soldPct.toFixed(2)+"%", l:"Sold %", c:"#86efac" },{ v:fmtNum(totUns), l:"Unsold", c:"#f87171" },{ v:pct.toFixed(2)+"%", l:"UNS %", c:"#fbbf24" },{ v:"~"+fmtNum(daily), l:"Per Day", c:"#a78bfa" },{ v:fmtNum(totSale), l:"Dispatched", c:"#93c5fd" }].map(k=>(
             <div key={k.l} style={{ background:"rgba(255,255,255,0.07)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:10, padding:"8px 14px", textAlign:"center", minWidth:80 }}>
               <span style={{ fontFamily:"monospace", fontSize:16, fontWeight:700, color:k.c, display:"block" }}>{k.v}</span>
               <span style={{ fontSize:10, color:"#64748b", textTransform:"uppercase", letterSpacing:0.6 }}>{k.l}</span>
@@ -796,7 +803,7 @@ function Dashboard({ data, mapping, filename, onReset }) {
           <button onClick={()=>setFilters({})} style={{ background:"#fee2e2", border:"1px solid #fca5a5", borderRadius:7, color:"#dc2626", fontSize:12, fontWeight:700, padding:"4px 12px", cursor:"pointer" }}>✕ Reset</button>
         )}
         <div style={{ marginLeft:"auto", background:"#dbeafe", border:"1px solid #bfdbfe", borderRadius:20, padding:"3px 12px", fontSize:11, fontWeight:600, color:"#1d4ed8" }}>
-          {filtered.length.toLocaleString()} records · {fmtNum(totSale)} sale · {fmtNum(totUns)} UNS · {pct.toFixed(2)}%
+          {filtered.length.toLocaleString()} records · {fmtNum(totSale)} dispatched · {fmtNum(totSold)} sold ({soldPct.toFixed(2)}%) · {fmtNum(totUns)} UNS ({pct.toFixed(2)}%)
         </div>
       </div>
  
@@ -814,11 +821,42 @@ function Dashboard({ data, mapping, filename, onReset }) {
  
         {/* ── OVERVIEW ── */}
         {activeTab==="overview" && (<>
+          {/* Aggregate summary strip */}
+          <div style={{ background:"#fff", border:"1px solid #e2e8f0", borderRadius:14, padding:"16px 22px", marginBottom:18, boxShadow:"0 1px 4px rgba(0,0,0,0.05)" }}>
+            <div style={{ fontSize:11, fontWeight:700, color:"#64748b", textTransform:"uppercase", letterSpacing:1, marginBottom:12 }}>
+              📊 Aggregate Summary — Filtered Data ({filtered.length.toLocaleString()} records)
+            </div>
+            <div style={{ display:"flex", gap:0, flexWrap:"wrap", borderRadius:10, overflow:"hidden", border:"1px solid #e2e8f0" }}>
+              {[
+                { label:"Total Dispatched", value:fmtNum(totSale), pctLabel:null, pctVal:null, bg:"#f8fafc", border:"#e2e8f0", color:"#1d4ed8" },
+                { label:"Sold Copies", value:fmtNum(totSold), pctLabel:"Sold %", pctVal:soldPct.toFixed(2)+"%", bg:"#f0fdf4", border:"#bbf7d0", color:"#16a34a" },
+                { label:"Unsold Copies", value:fmtNum(totUns),  pctLabel:"UNS %",  pctVal:pct.toFixed(2)+"%",    bg:"#fff7ed", border:"#fed7aa", color:"#ea580c" },
+                { label:"Daily Waste", value:"~"+fmtNum(daily), pctLabel:"Per Day", pctVal:null, bg:"#fdf4ff", border:"#e9d5ff", color:"#7c3aed" },
+              ].map((item, i, arr) => (
+                <div key={item.label} style={{ flex:"1 1 160px", padding:"14px 18px", background:item.bg, borderRight: i < arr.length-1 ? `1px solid ${item.border}` : "none" }}>
+                  <div style={{ fontSize:11, color:"#64748b", fontWeight:600, marginBottom:4 }}>{item.label}</div>
+                  <div style={{ fontFamily:"monospace", fontSize:22, fontWeight:800, color:item.color, lineHeight:1 }}>{item.value}</div>
+                  {item.pctLabel && (
+                    <div style={{ marginTop:6, display:"inline-flex", alignItems:"center", gap:6, background: item.color+"18", borderRadius:20, padding:"2px 10px" }}>
+                      <span style={{ fontSize:10, color:item.color, fontWeight:700, textTransform:"uppercase", letterSpacing:0.5 }}>{item.pctLabel}</span>
+                      <span style={{ fontFamily:"monospace", fontSize:13, fontWeight:800, color:item.color }}>{item.pctVal}</span>
+                    </div>
+                  )}
+                  {!item.pctLabel && item.label === "Daily Waste" && (
+                    <div style={{ marginTop:6, fontSize:11, color:"#94a3b8" }}>copies/day avg</div>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop:10, fontSize:11, color:"#94a3b8", fontStyle:"italic" }}>
+              Sold% = (Dispatched − Unsold) ÷ Dispatched × 100 &nbsp;|&nbsp; UNS% = Unsold ÷ Dispatched × 100
+            </div>
+          </div>
           <div style={g4}>
-            <KPICard label="Total UNS Copies" value={fmtNum(totUns)} sub="Unsold / returned copies" accent="#dc2626" icon="📦" />
-            <KPICard label="UNS %" value={pct.toFixed(2)+"%"} sub={`${fmtNum(totSale)} total dispatched`} accent="#d97706" icon="📊" />
-            <KPICard label="Total Sale" value={fmtNum(totSale)} sub="All dispatched units" accent="#2563eb" icon="📰" />
-            <KPICard label="Daily Waste" value={"~"+fmtNum(daily)} sub="Copies returned per day" accent="#16a34a" icon="⏱" />
+            <KPICard label="Total UNS Copies" value={fmtNum(totUns)} sub={`${pct.toFixed(2)}% of dispatched`} accent="#dc2626" icon="📦" />
+            <KPICard label="UNS %" value={pct.toFixed(2)+"%"} sub={`${fmtNum(totUns)} ÷ ${fmtNum(totSale)}`} accent="#d97706" icon="📊" />
+            <KPICard label="Sold Copies" value={fmtNum(totSold)} sub={`${soldPct.toFixed(2)}% sell-through`} accent="#16a34a" icon="✅" />
+            <KPICard label="Daily Waste" value={"~"+fmtNum(daily)} sub="Copies returned per day" accent="#7c3aed" icon="⏱" />
           </div>
           <div style={g2}>
             {hasPubl && byPubl.length>0 && (
@@ -1000,7 +1038,7 @@ function Dashboard({ data, mapping, filename, onReset }) {
               </div>
             ) : (
               <div style={{ background:"#fff", borderRadius:12, padding:"18px 20px", border:"1px solid #e2e8f0", boxShadow:"0 1px 3px rgba(0,0,0,0.05)" }}>
-                <DataTable rows={filtered} columns={tableColumns} totals={tableColumns.reduce((acc, col) => {
+                <DataTable rows={filtered} columns={tableColumns} aggPct={pct} totals={tableColumns.reduce((acc, col) => {
                     if (col === "sale") acc[col] = totSale;
                     else if (col === "uns") acc[col] = totUns;
                     else acc[col] = null;
