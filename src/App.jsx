@@ -382,10 +382,72 @@ const lineOpts = (ySuffix="%") => ({ scales:{ x:{ grid:G, ticks:{ maxTicksLimit:
 const MONTHS12 = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const YRCOLORS = ["#16a34a","#dc2626","#2563eb","#d97706","#7c3aed"];
  
+// ─── Aggregate row helpers ────────────────────────────────────────────────────
+// Maps each known column name (as it appears after ColumnMapper) to its agg type.
+// "uniqueCount" = COUNTD, "sum" = SUM, "avg" = AVERAGE of numeric vals,
+// "unsoldPct" = SUM(uns)/SUM(sale)*100, "label" = fixed label cell.
+const COL_AGG = {
+  // first column label
+  "SOrg.":                    "uniqueCount",
+  "SG":                       "uniqueCount",
+  "Region":                   "uniqueCount",
+  "Customer":                 "uniqueCount",
+  "Name":                     "uniqueCount",
+  "Station":                  "uniqueCount",
+  "Edition":                  "uniqueCount",
+  "Edition Desc":             "uniqueCount",
+  "Concatenate on Original":  "uniqueCount",
+  "Publ":                     "uniqueCount",
+  "Product-Main":             "uniqueCount",
+  // first Month col
+  "Month":                    "uniqueCount",
+  "Days":                     "avg",
+  "Type":                     "uniqueCount",
+  "Sale":                     "sum",
+  "Uns":                      "unsoldPct",  // sum + pct badge
+  // second Month col handled by key dedup — use generic "uniqueCount"
+  "Avg Sale":                 "sum",
+  "Avg Uns":                  "sum",
+  "Unsold%":                  "pct",
+  "Uns Range":                "uniqueCount",
+  "City/UPC":                 "uniqueCount",
+  "PO Range":                 "uniqueCount",
+  "Smart-Next":               "uniqueCount",
+  "Product-Sub":              "uniqueCount",
+  // fallback for internally mapped cols
+  "sale":                     "sum",
+  "uns":                      "unsoldPct",
+};
+
+function computeAggRow(rows, columns) {
+  if (!rows.length) return {};
+  const agg = {};
+  const totSale = rows.reduce((s, r) => s + (parseFloat(r["Sale"] ?? r["sale"]) || 0), 0);
+  const totUns  = rows.reduce((s, r) => s + (parseFloat(r["Uns"]  ?? r["uns"])  || 0), 0);
+
+  columns.forEach(col => {
+    const type = COL_AGG[col] ?? (col === "sale" || col === "uns" ? "sum" : "uniqueCount");
+    if (type === "uniqueCount") {
+      agg[col] = new Set(rows.map(r => r[col]).filter(v => v !== "" && v != null)).size;
+    } else if (type === "sum") {
+      agg[col] = rows.reduce((s, r) => s + (parseFloat(r[col]) || 0), 0);
+    } else if (type === "avg") {
+      const vals = rows.map(r => parseFloat(r[col])).filter(v => !isNaN(v));
+      agg[col] = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+    } else if (type === "pct") {
+      agg[col] = totSale > 0 ? (totUns / totSale) * 100 : 0;
+    } else if (type === "unsoldPct") {
+      // sum value stored here; pct shown as badge separately
+      agg[col] = rows.reduce((s, r) => s + (parseFloat(r[col]) || 0), 0);
+    }
+  });
+  return { agg, totSale, totUns };
+}
+
 // ─── Data Table ──────────────────────────────────────────────────────────────
 const PAGE_SIZE = 100;
 
-function DataTable({ rows, columns, totals, aggPct }) {
+function DataTable({ rows, columns }) {
   const [page, setPage] = useState(0);
   const [sortCol, setSortCol] = useState(null);
   const [sortDir, setSortDir] = useState("asc"); // "asc" | "desc"
@@ -490,27 +552,64 @@ function DataTable({ rows, columns, totals, aggPct }) {
             </tr>
           </thead>
           <tbody>
-            {/* Totals row */}
-            {totals && (
-              <tr style={{ borderBottom:"2px solid #bfdbfe", background:"#dbeafe", fontWeight:700, position:"sticky", top:37, zIndex:1 }}>
-                <td style={{ padding:"8px 12px", color:"#1d4ed8", fontFamily:"monospace", fontSize:11, fontWeight:800 }}>Σ</td>
-                {columns.map(col => {
-                  const val = totals[col];
-                  const isNum = col === "sale" || col === "uns";
-                  if (val == null) return <td key={col} style={{ padding:"8px 12px", color:"#93c5fd", fontSize:11 }}>—</td>;
-                  return (
-                    <td key={col} style={{ padding:"8px 12px", color:"#1d4ed8", fontFamily: isNum?"monospace":"inherit", fontSize:12, fontWeight:800 }}>
-                      {isNum ? Number(val).toLocaleString() : val}
-                      {col === "uns" && aggPct != null && (
-                        <span style={{ marginLeft:8, background:"#fef3c7", color:"#b45309", border:"1px solid #fcd34d", borderRadius:20, padding:"1px 8px", fontFamily:"monospace", fontSize:11, fontWeight:700 }}>
-                          {aggPct.toFixed(2)}%
-                        </span>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-            )}
+            {/* Aggregate row — computed from all filtered rows */}
+            {(() => {
+              const { agg, totSale, totUns } = computeAggRow(rows, columns);
+              const aggPct = totSale > 0 ? (totUns / totSale) * 100 : 0;
+              const tdBase = { padding:"8px 12px", fontSize:12, fontWeight:800 };
+              return (
+                <tr style={{ borderBottom:"2px solid #bfdbfe", background:"#dbeafe", fontWeight:700, position:"sticky", top:37, zIndex:1 }}>
+                  <td style={{ ...tdBase, color:"#1d4ed8", fontFamily:"monospace", fontSize:11 }}>Σ</td>
+                  {columns.map(col => {
+                    const type = COL_AGG[col] ?? (col === "sale" || col === "uns" ? "sum" : "uniqueCount");
+                    const val  = agg[col];
+                    if (val == null) return <td key={col} style={{ ...tdBase, color:"#93c5fd" }}>—</td>;
+
+                    if (type === "uniqueCount") {
+                      return (
+                        <td key={col} style={{ ...tdBase, color:"#1d4ed8" }}>
+                          <span style={{ background:"#e0e7ff", color:"#3730a3", border:"1px solid #c7d2fe", borderRadius:12, padding:"1px 8px", fontFamily:"monospace", fontSize:11 }}>
+                            {Number(val).toLocaleString()}
+                          </span>
+                        </td>
+                      );
+                    }
+                    if (type === "avg") {
+                      return (
+                        <td key={col} style={{ ...tdBase, color:"#1d4ed8", fontFamily:"monospace" }}>
+                          {val.toFixed(2)}
+                          <span style={{ marginLeft:5, fontSize:9, color:"#6366f1", fontWeight:600 }}>AVG</span>
+                        </td>
+                      );
+                    }
+                    if (type === "pct") {
+                      return (
+                        <td key={col} style={{ ...tdBase, color:"#1d4ed8" }}>
+                          <span style={{ background:"#fef3c7", color:"#b45309", border:"1px solid #fcd34d", borderRadius:20, padding:"1px 8px", fontFamily:"monospace", fontSize:11, fontWeight:700 }}>
+                            {val.toFixed(2)}%
+                          </span>
+                        </td>
+                      );
+                    }
+                    if (type === "sum") {
+                      return (
+                        <td key={col} style={{ ...tdBase, color:"#1d4ed8", fontFamily:"monospace" }}>
+                          {Number(val).toLocaleString()}
+                        </td>
+                      );
+                    }
+                    if (type === "unsoldPct") {
+                      return (
+                        <td key={col} style={{ ...tdBase, color:"#1d4ed8", fontFamily:"monospace" }}>
+                          {Number(val).toLocaleString()}
+                        </td>
+                      );
+                    }
+                    return <td key={col} style={{ ...tdBase, color:"#1d4ed8" }}>{val}</td>;
+                  })}
+                </tr>
+              );
+            })()}
             {pageRows.map((row, i) => {
               const globalIdx = safePage * PAGE_SIZE + i;
               return (
@@ -656,10 +755,8 @@ function Dashboard({ data, mapping, filename, onReset }) {
   // All columns to show in data table (original header order, exclude synthesised dupes)
   const tableColumns = useMemo(() => {
     if (!data.length) return [];
-    const keys = Object.keys(data[0]);
-    // Show all original columns; put sale/uns last as they're the most important numerics
-    const numeric = ["sale","uns"];
-    return [...keys.filter(k=>!numeric.includes(k)), ...numeric.filter(k=>keys.includes(k))];
+    // Show all original columns; exclude internal sale/uns aliases to avoid duplicate columns
+    return Object.keys(data[0]).filter(k => k !== "sale" && k !== "uns");
   }, [data]);
  
   const TABS = [
@@ -1038,12 +1135,7 @@ function Dashboard({ data, mapping, filename, onReset }) {
               </div>
             ) : (
               <div style={{ background:"#fff", borderRadius:12, padding:"18px 20px", border:"1px solid #e2e8f0", boxShadow:"0 1px 3px rgba(0,0,0,0.05)" }}>
-                <DataTable rows={filtered} columns={tableColumns} aggPct={pct} totals={tableColumns.reduce((acc, col) => {
-                    if (col === "sale") acc[col] = totSale;
-                    else if (col === "uns") acc[col] = totUns;
-                    else acc[col] = null;
-                    return acc;
-                  }, {})} />
+                <DataTable rows={filtered} columns={tableColumns} />
               </div>
             )}
           </div>
