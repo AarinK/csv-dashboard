@@ -411,6 +411,7 @@ const COL_AGG = {
   "Unsold%":                  "pct",
   "Uns Range":                "uniqueCount",
   "City/UPC":                 "uniqueCount",
+  "Loca/UPC":                 "uniqueCount",
   "PO Range":                 "uniqueCount",
   "Smart-Next":               "uniqueCount",
   "Product-Sub":              "uniqueCount",
@@ -554,60 +555,74 @@ function DataTable({ rows, columns }) {
           <tbody>
             {/* Aggregate row — computed from all filtered rows */}
             {(() => {
-              const { agg, totSale, totUns } = computeAggRow(rows, columns);
-              const aggPct = totSale > 0 ? (totUns / totSale) * 100 : 0;
-              const tdBase = { padding:"8px 12px", fontSize:12, fontWeight:800 };
-              return (
-                <tr style={{ borderBottom:"2px solid #bfdbfe", background:"#dbeafe", fontWeight:700, position:"sticky", top:37, zIndex:1 }}>
-                  <td style={{ ...tdBase, color:"#1d4ed8", fontFamily:"monospace", fontSize:11 }}>Σ</td>
-                  {columns.map(col => {
-                    const type = COL_AGG[col] ?? (col === "sale" || col === "uns" ? "sum" : "uniqueCount");
-                    const val  = agg[col];
-                    if (val == null) return <td key={col} style={{ ...tdBase, color:"#93c5fd" }}>—</td>;
+              // Helper to detect the Loca/UPC column name (handles "Loca/UPC", "City/UPC", etc.)
+              const locaUpcCol = columns.find(c => /loca.*upc|city.*upc|upc.*loca|upc.*city/i.test(c)) ?? null;
 
-                    if (type === "uniqueCount") {
-                      return (
-                        <td key={col} style={{ ...tdBase, color:"#1d4ed8" }}>
-                          <span style={{ background:"#e0e7ff", color:"#3730a3", border:"1px solid #c7d2fe", borderRadius:12, padding:"1px 8px", fontFamily:"monospace", fontSize:11 }}>
+              // Renders one aggregate row given a subset of rows
+              const renderAggRow = (rowSubset, rowLabel, bgColor, borderColor, labelColor, badgeBg, badgeColor, badgeBorder, top, isSticky=false) => {
+                const { agg, totSale, totUns } = computeAggRow(rowSubset, columns);
+                const tdBase = { padding:"8px 12px", fontSize:12, fontWeight:800 };
+                const stickyStyle = isSticky ? { position:"sticky", top, zIndex:1 } : {};
+                return (
+                  <tr style={{ borderBottom:`2px solid ${borderColor}`, background:bgColor, fontWeight:700, ...stickyStyle }}>
+                    <td style={{ ...tdBase, color:labelColor, fontFamily:"monospace", fontSize:11 }}>{rowLabel}</td>
+                    {columns.map(col => {
+                      const type = COL_AGG[col] ?? (col === "sale" || col === "uns" ? "sum" : "uniqueCount");
+                      const val  = agg[col];
+                      if (val == null) return <td key={col} style={{ ...tdBase, color:labelColor, opacity:0.4 }}>—</td>;
+
+                      if (type === "uniqueCount") {
+                        return (
+                          <td key={col} style={{ ...tdBase, color:labelColor }}>
+                            <span style={{ background:badgeBg, color:badgeColor, border:`1px solid ${badgeBorder}`, borderRadius:12, padding:"1px 8px", fontFamily:"monospace", fontSize:11 }}>
+                              {Number(val).toLocaleString()}
+                            </span>
+                          </td>
+                        );
+                      }
+                      if (type === "avg") {
+                        return (
+                          <td key={col} style={{ ...tdBase, color:labelColor, fontFamily:"monospace" }}>
+                            {val.toFixed(2)}
+                            <span style={{ marginLeft:5, fontSize:9, color:badgeColor, fontWeight:600 }}>AVG</span>
+                          </td>
+                        );
+                      }
+                      if (type === "pct") {
+                        return (
+                          <td key={col} style={{ ...tdBase, color:labelColor }}>
+                            <span style={{ background:"#fef3c7", color:"#b45309", border:"1px solid #fcd34d", borderRadius:20, padding:"1px 8px", fontFamily:"monospace", fontSize:11, fontWeight:700 }}>
+                              {val.toFixed(2)}%
+                            </span>
+                          </td>
+                        );
+                      }
+                      if (type === "sum" || type === "unsoldPct") {
+                        return (
+                          <td key={col} style={{ ...tdBase, color:labelColor, fontFamily:"monospace" }}>
                             {Number(val).toLocaleString()}
-                          </span>
-                        </td>
-                      );
-                    }
-                    if (type === "avg") {
-                      return (
-                        <td key={col} style={{ ...tdBase, color:"#1d4ed8", fontFamily:"monospace" }}>
-                          {val.toFixed(2)}
-                          <span style={{ marginLeft:5, fontSize:9, color:"#6366f1", fontWeight:600 }}>AVG</span>
-                        </td>
-                      );
-                    }
-                    if (type === "pct") {
-                      return (
-                        <td key={col} style={{ ...tdBase, color:"#1d4ed8" }}>
-                          <span style={{ background:"#fef3c7", color:"#b45309", border:"1px solid #fcd34d", borderRadius:20, padding:"1px 8px", fontFamily:"monospace", fontSize:11, fontWeight:700 }}>
-                            {val.toFixed(2)}%
-                          </span>
-                        </td>
-                      );
-                    }
-                    if (type === "sum") {
-                      return (
-                        <td key={col} style={{ ...tdBase, color:"#1d4ed8", fontFamily:"monospace" }}>
-                          {Number(val).toLocaleString()}
-                        </td>
-                      );
-                    }
-                    if (type === "unsoldPct") {
-                      return (
-                        <td key={col} style={{ ...tdBase, color:"#1d4ed8", fontFamily:"monospace" }}>
-                          {Number(val).toLocaleString()}
-                        </td>
-                      );
-                    }
-                    return <td key={col} style={{ ...tdBase, color:"#1d4ed8" }}>{val}</td>;
-                  })}
-                </tr>
+                          </td>
+                        );
+                      }
+                      return <td key={col} style={{ ...tdBase, color:labelColor }}>{val}</td>;
+                    })}
+                  </tr>
+                );
+              };
+
+              // Detect Loca/UPC values (case-insensitive match for "Local" and "UPC")
+              const localRows = locaUpcCol ? rows.filter(r => String(r[locaUpcCol] ?? "").toLowerCase() === "local") : [];
+              const upcRows   = locaUpcCol ? rows.filter(r => String(r[locaUpcCol] ?? "").toLowerCase() === "upc")   : [];
+
+              return (
+                <>
+                  {/* Total row */}
+                  {renderAggRow(rows, "Σ", "#dbeafe", "#bfdbfe", "#1d4ed8", "#e0e7ff", "#3730a3", "#c7d2fe", 37, true)}
+                  {/* Local sub-total */}
+                  {renderAggRow(localRows, "Local", "#dcfce7", "#86efac", "#15803d", "#bbf7d0", "#166534", "#86efac", 37+34, true)}
+                  {/* UPC sub-total */}
+                  {renderAggRow(upcRows,   "UPC",   "#fef9c3", "#fde047", "#92400e", "#fef08a", "#78350f", "#fde047", 37+34+34, true)}
+                </>
               );
             })()}
             {pageRows.map((row, i) => {
@@ -666,6 +681,7 @@ function DataTable({ rows, columns }) {
 function Dashboard({ data, mapping, filename, onReset }) {
   const [activeTab, setActiveTab] = useState("data");
   const [filters, setFilters] = useState({});
+  const [monthRange, setMonthRange] = useState({ from: "", to: "" });
   // Lazy-load state for Data tab: false = not yet revealed, true = shown
   // Once shown, stays shown and auto-updates with filter changes
   const [dataShown, setDataShown] = useState(false);
@@ -681,11 +697,27 @@ function Dashboard({ data, mapping, filename, onReset }) {
       return s.size > 1 && s.size <= 500;
     });
   }, [data]);
- 
+
+  // All unique months sorted chronologically (for the month range picker)
+  const allMonthsSorted = useMemo(() => {
+    if (!mapping.month) return [];
+    return [...new Set(data.map(r => r[mapping.month]).filter(Boolean))].sort((a, b) => mkey(a) - mkey(b));
+  }, [data, mapping.month]);
+
   const filtered = useMemo(() => {
     const active = Object.entries(filters).filter(([,v]) => v !== "" && v != null);
-    return active.length ? data.filter(row => active.every(([k,v]) => row[k] === v)) : data;
-  }, [data, filters]);
+    let rows = active.length ? data.filter(row => active.every(([k,v]) => row[k] === v)) : data;
+    // Apply month range filter
+    if (mapping.month && (monthRange.from || monthRange.to)) {
+      const fromKey = monthRange.from ? mkey(monthRange.from) : -Infinity;
+      const toKey   = monthRange.to   ? mkey(monthRange.to)   :  Infinity;
+      rows = rows.filter(r => {
+        const k = mkey(r[mapping.month]);
+        return k >= fromKey && k <= toKey;
+      });
+    }
+    return rows;
+  }, [data, filters, mapping.month, monthRange]);
  
   const uniques = useMemo(() => {
     const active = Object.fromEntries(Object.entries(filters).filter(([,v]) => v !== "" && v != null));
@@ -886,6 +918,29 @@ function Dashboard({ data, mapping, filename, onReset }) {
       {/* Filter bar */}
       <div style={{ background:"#fff", borderBottom:"1px solid #e2e8f0", padding:"10px 24px", display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", position:"sticky", top:0, zIndex:100, boxShadow:"0 1px 3px rgba(0,0,0,0.06)" }}>
         <span style={{ fontSize:11, fontWeight:700, color:"#64748b", textTransform:"uppercase", letterSpacing:1 }}>🔍 Filter</span>
+
+        {/* Month range picker */}
+        {allMonthsSorted.length > 1 && (
+          <div style={{ display:"flex", alignItems:"center", gap:6, background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:8, padding:"3px 10px" }}>
+            <span style={{ fontSize:11, fontWeight:600, color:"#64748b" }}>📅 Month</span>
+            <select
+              value={monthRange.from}
+              onChange={e => setMonthRange(r => ({ ...r, from: e.target.value }))}
+              style={{ padding:"3px 20px 3px 6px", border:`1px solid ${monthRange.from ? "#2563eb" : "#cbd5e1"}`, borderRadius:6, fontSize:12, color:"#334155", background:monthRange.from ? "#dbeafe" : "#f8fafc", appearance:"none", backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E\")", backgroundRepeat:"no-repeat", backgroundPosition:"right 5px center", minWidth:90 }}>
+              <option value="">From</option>
+              {allMonthsSorted.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+            <span style={{ fontSize:12, color:"#94a3b8", fontWeight:600 }}>→</span>
+            <select
+              value={monthRange.to}
+              onChange={e => setMonthRange(r => ({ ...r, to: e.target.value }))}
+              style={{ padding:"3px 20px 3px 6px", border:`1px solid ${monthRange.to ? "#2563eb" : "#cbd5e1"}`, borderRadius:6, fontSize:12, color:"#334155", background:monthRange.to ? "#dbeafe" : "#f8fafc", appearance:"none", backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E\")", backgroundRepeat:"no-repeat", backgroundPosition:"right 5px center", minWidth:90 }}>
+              <option value="">To</option>
+              {allMonthsSorted.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+        )}
+
         {filterKeys.map(k=>(
           <div key={k} style={{ display:"flex", alignItems:"center", gap:6 }}>
             <label style={{ fontSize:11, fontWeight:600, color:"#94a3b8" }}>{k}</label>
@@ -896,8 +951,8 @@ function Dashboard({ data, mapping, filename, onReset }) {
             </select>
           </div>
         ))}
-        {Object.values(filters).some(Boolean) && (
-          <button onClick={()=>setFilters({})} style={{ background:"#fee2e2", border:"1px solid #fca5a5", borderRadius:7, color:"#dc2626", fontSize:12, fontWeight:700, padding:"4px 12px", cursor:"pointer" }}>✕ Reset</button>
+        {(Object.values(filters).some(Boolean) || monthRange.from || monthRange.to) && (
+          <button onClick={()=>{ setFilters({}); setMonthRange({ from:"", to:"" }); }} style={{ background:"#fee2e2", border:"1px solid #fca5a5", borderRadius:7, color:"#dc2626", fontSize:12, fontWeight:700, padding:"4px 12px", cursor:"pointer" }}>✕ Reset</button>
         )}
         <div style={{ marginLeft:"auto", background:"#dbeafe", border:"1px solid #bfdbfe", borderRadius:20, padding:"3px 12px", fontSize:11, fontWeight:600, color:"#1d4ed8" }}>
           {filtered.length.toLocaleString()} records · {fmtNum(totSale)} dispatched · {fmtNum(totSold)} sold ({soldPct.toFixed(2)}%) · {fmtNum(totUns)} UNS ({pct.toFixed(2)}%)
