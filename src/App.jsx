@@ -406,8 +406,8 @@ const COL_AGG = {
   "Sale":                     "sum",
   "Uns":                      "unsoldPct",  // sum + pct badge
   // second Month col handled by key dedup — use generic "uniqueCount"
-  "Avg Sale":                 "sum",
-  "Avg Uns":                  "sum",
+  "Avg Sale":                 "avg",
+  "Avg Uns":                  "avg",
   "Unsold%":                  "pct",
   "Uns Range":                "uniqueCount",
   "City/UPC":                 "uniqueCount",
@@ -583,7 +583,7 @@ function DataTable({ rows, columns }) {
                       if (type === "avg") {
                         return (
                           <td key={col} style={{ ...tdBase, color:labelColor, fontFamily:"monospace" }}>
-                            {val.toFixed(2)}
+                            {Math.round(val).toLocaleString()}
                             <span style={{ marginLeft:5, fontSize:9, color:badgeColor, fontWeight:600 }}>AVG</span>
                           </td>
                         );
@@ -635,9 +635,14 @@ function DataTable({ rows, columns }) {
                   {columns.map(col => {
                     const v = row[col];
                     const isNum = col === "sale" || col === "uns";
+                    const isPct = COL_AGG[col] === "pct";
                     return (
-                      <td key={col} style={{ padding:"7px 12px", color: isNum?"#1d4ed8":"#334155", fontFamily: isNum?"monospace":"inherit", maxWidth:200, overflow:"hidden", textOverflow:"ellipsis" }}>
-                        {isNum ? Number(v).toLocaleString() : (v ?? "")}
+                      <td key={col} style={{ padding:"7px 12px", color: isNum?"#1d4ed8":isPct?"#92400e":"#334155", fontFamily: (isNum||isPct)?"monospace":"inherit", maxWidth:200, overflow:"hidden", textOverflow:"ellipsis" }}>
+                        {isNum
+                          ? Number(v).toLocaleString()
+                          : isPct
+                            ? <span style={{ background:"#fef3c7", color:"#b45309", border:"1px solid #fcd34d", borderRadius:20, padding:"2px 8px", fontFamily:"monospace", fontSize:11, fontWeight:700 }}>{parseFloat(v||0).toFixed(2)}%</span>
+                            : (v ?? "")}
                       </td>
                     );
                   })}
@@ -681,7 +686,22 @@ function DataTable({ rows, columns }) {
 function Dashboard({ data, mapping, filename, onReset }) {
   const [activeTab, setActiveTab] = useState("data");
   const [filters, setFilters] = useState({});
+
+  // Compute the first month in data so we can default the range to it
+  const firstDataMonth = useMemo(() => {
+    if (!mapping.month) return "";
+    const months = [...new Set(data.map(r => r[mapping.month]).filter(Boolean))].sort((a, b) => mkey(a) - mkey(b));
+    return months[0] ?? "";
+  }, [data, mapping.month]);
+
   const [monthRange, setMonthRange] = useState({ from: "", to: "" });
+
+  // Once we know the first data month, default "from" to it (runs once on mount)
+  useEffect(() => {
+    if (firstDataMonth) {
+      setMonthRange(r => r.from === "" ? { ...r, from: firstDataMonth } : r);
+    }
+  }, [firstDataMonth]);
   // Lazy-load state for Data tab: false = not yet revealed, true = shown
   // Once shown, stays shown and auto-updates with filter changes
   const [dataShown, setDataShown] = useState(false);
